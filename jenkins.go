@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 type Auth struct {
@@ -130,6 +131,47 @@ func (jenkins *Jenkins) post(path string, params url.Values, body interface{}) (
 
 	return jenkins.parseResponse(resp, body)
 }
+func (jenkins *Jenkins) postForce(path string, params url.Values, body interface{}) (string, int64) {
+	requestUrl := jenkins.buildUrl(path, params)
+	req, err := http.NewRequest("POST", requestUrl, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	resp, err := jenkins.sendRequest(req)
+	if err != nil {
+		panic(err)
+	}
+	if !(200 <= resp.StatusCode && resp.StatusCode <= 299) {
+		panic(err)
+	}
+
+	location, err := resp.Location()
+	if err != nil {
+		panic(err)
+	}
+	loc_string := fmt.Sprintf("%sapi/json", location.String())
+	time.Sleep(10 * time.Second)
+	second_req, err := http.NewRequest("GET", loc_string, nil)
+	if err != nil {
+		panic(err)
+	}
+	second_resp, err := jenkins.sendRequest(second_req)
+	if err != nil {
+		panic(err)
+	}
+	defer second_resp.Body.Close()
+	var item_resp Item
+	body, berr := ioutil.ReadAll(second_resp.Body)
+	if berr != nil {
+		print(berr)
+	}
+	unerr := json.Unmarshal([]byte(body.([]uint8)), &item_resp)
+	if unerr != nil {
+		print(unerr)
+	}
+	return item_resp.Executable.Url, item_resp.Executable.Number
+}
 func (jenkins *Jenkins) postXml(path string, params url.Values, xmlBody io.Reader, body interface{}) (err error) {
 	requestUrl := jenkins.baseUrl + path
 	if params != nil {
@@ -226,6 +268,10 @@ func (jenkins *Jenkins) Build(job Job, params url.Values) error {
 	} else {
 		return jenkins.post(fmt.Sprintf("/job/%s/build", job.Name), params, nil)
 	}
+}
+
+func (jenkins *Jenkins) BuildForce(job Job, params url.Values) (string, int64) {
+	return jenkins.postForce(fmt.Sprintf("/job/%s/buildWithParameters", job.Name), params, nil)
 }
 
 // Get the console output from a build.
